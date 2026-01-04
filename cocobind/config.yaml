@@ -1,0 +1,69 @@
+# CoCoBind Configuration
+
+# Experiment
+exp_name: "base"
+seed: 42
+device: "cuda"
+num_workers: 0
+
+# Data
+data:
+  root: "./data"  # Path to data directory containing unseen_*/
+  max_len: 512
+  cache_dir: "./cache/rna_embeddings"
+
+# Molecular encoder
+mol_encoder:
+  type: "ecfp4"  # ecfp4, ouroboros
+  features_path: null  # For ouroboros: path to precomputed features
+
+# Model architecture
+model:
+  d_model: 256
+  n_mol_tokens: 8
+  n_heads: 8
+  dropout: 0.1
+  use_cross_attn: true
+
+# Training
+train:
+  epochs: 200
+  batch_size: 32
+  lr: 5.0e-4
+  weight_decay: 1.0e-4
+  grad_clip: 1.0
+  patience: 30
+  # Optimizer
+  optimizer: "adamw"
+  # Scheduler
+  scheduler: "warmup_cosine"
+  warmup_epochs: 10
+  min_lr: 1.0e-6
+  # EMA
+  use_ema: false
+  ema_decay: 0.999
+
+# Loss weights
+loss:
+  lambda_site: 1.0
+  lambda_cons: 0.5
+  lambda_ctr: 0.0
+  cons_aggregation: "noisy_or"  # noisy_or, max, mean
+  site_only_positive: true  # Only compute site loss on positive samples
+
+# Contrastive learning
+contrastive:
+  enabled: false
+  temperature: 0.1
+
+# Evaluation
+eval:
+  topk_recall: [10]
+  topk_ratio: 0.05
+  best_metric: "int_aupr"
+
+# Output
+output:
+  dir: "./outputs"
+  save_every: 50
+  save_preds: true
