@@ -42,6 +42,10 @@ class ECFP4Featurizer:
         """
         from rdkit import Chem
         from rdkit.Chem import AllChem
+        from rdkit import RDLogger
+        
+        # Suppress RDKit warnings (including MorganGenerator deprecation)
+        RDLogger.DisableLog('rdApp.warning')
         
         mol = Chem.MolFromSmiles(smiles)
         if mol is None:

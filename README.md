@@ -26,7 +26,7 @@ conda create -n cocobind python=3.9
 conda activate cocobind
 
 # Install PyTorch (adjust for your CUDA version)
-pip install torch>=2.0.0
+pip3 install torch==2.2.1 torchvision==0.17.1 torchaudio==2.2.1 --index-url https://download.pytorch.org/whl/cu121
 
 # Install dependencies
 pip install -r requirements.txt
@@ -91,6 +91,7 @@ CoCoBind/
 ## 📊 Data Preparation
 
 ### Dataset Structure
+The datasets used in this study can be found [here](https://github.com/GIST-CSBL/DeepRNA-DTI/tree/main/Dataset), we need place the them to the `data` folder.
 
 Organize your data as follows:
 
@@ -99,11 +100,11 @@ data/
 ├── unseen_pair/
 │   ├── dti_data/
 │   │   ├── train_fold0/
-│   │   │   └── raw/data.csv
+│   │   │   └── raw/interactions.csv
 │   │   ├── val_fold0/
-│   │   │   └── raw/data.csv
+│   │   │   └── raw/interactions.csv
 │   │   └── test_fold/
-│   │       └── raw/data.csv
+│   │       └── raw/interactions.csv
 │   └── bs_data/
 │       └── ... (same structure)
 ├── unseen_rna/
