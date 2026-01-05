@@ -91,7 +91,6 @@ CoCoBind/
 ## 📊 Data Preparation
 
 ### Dataset Structure
-The datasets used in this study can be found [here](https://github.com/GIST-CSBL/DeepRNA-DTI/tree/main/Dataset), we need place the them to the `data` folder.
 
 Organize your data as follows:
 

@@ -90,8 +90,6 @@ cache/
 wandb/
 mlruns/
 
-# Data (too large for git)
-data/
 
 # Large model weights
 *.bin
