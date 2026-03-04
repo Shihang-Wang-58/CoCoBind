@@ -26,7 +26,7 @@ conda create -n cocobind python=3.9
 conda activate cocobind
 
 # Install PyTorch (adjust for your CUDA version)
-pip3 install torch==2.2.1 torchvision==0.17.1 torchaudio==2.2.1 --index-url https://download.pytorch.org/whl/cu121
+pip install torch==2.2.1 torchvision==0.17.1 torchaudio==2.2.1 --index-url https://download.pytorch.org/whl/cu121
 
 # Install dependencies
 pip install -r requirements.txt
@@ -121,6 +121,7 @@ Both DTI and binding site data use the same CSV format (`interactions.csv`):
 ```
 
 **Key columns:**
+
 - `sequence`: RNA sequence (A/U/G/C)
 - `smiles`: Small molecule SMILES string
 - `interactions`: Binary label (1.0 for positive, 0.0 for negative)
@@ -182,9 +183,9 @@ python -m cocobind.train --split unseen_pair --fold 0 \
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## 💌 Get in Touch 
+## 💌 Get in Touch
 
-We welcome community contributions of extension tools based on the CoCoBind model, etc. If you have any questions, please feel free to contact Shihang Wang (Email: p2521371@mpu.edu.mo). 
+We welcome community contributions of extension tools based on the CoCoBind model, etc. If you have any questions, please feel free to contact Shihang Wang (Email: p2521371@mpu.edu.mo).
 
 ## 🙏 Acknowledgments
 

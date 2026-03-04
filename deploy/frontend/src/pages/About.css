@@ -48,6 +48,18 @@
   margin-bottom: 8px;
 }
 
+.arch-img-container {
+  text-align: center;
+  margin: 24px 0;
+}
+
+.arch-img {
+  max-width: 100%;
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg);
+  border: 1px solid var(--border);
+}
+
 .metrics-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));

@@ -62,20 +62,11 @@ const Home = () => {
             transition={{ duration: 0.8, delay: 0.2 }}
             className="hero-visual"
           >
-            <div className="visual-card">
-              <div className="visual-icon">🧬</div>
-              <div className="visual-text">RNA Sequence</div>
-            </div>
-            <div className="visual-arrow">+</div>
-            <div className="visual-card">
-              <div className="visual-icon">💊</div>
-              <div className="visual-text">Small Molecule</div>
-            </div>
-            <div className="visual-arrow">→</div>
-            <div className="visual-card highlight">
-              <div className="visual-icon">✨</div>
-              <div className="visual-text">Binding Prediction</div>
-            </div>
+            <img 
+              src="/model_architecture.png" 
+              alt="CoCoBind Model Architecture" 
+              className="hero-arch-img"
+            />
           </motion.div>
         </div>
       </section>

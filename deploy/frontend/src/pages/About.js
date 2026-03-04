@@ -42,6 +42,13 @@ const About = () => {
 
         <div className="content-section card">
           <h2>Model Architecture</h2>
+          <div className="arch-img-container">
+            <img 
+              src="/model_architecture.png" 
+              alt="CoCoBind Model Architecture" 
+              className="arch-img"
+            />
+          </div>
           <p>CoCoBind consists of the following components:</p>
           <ol className="architecture-list">
             <li><strong>RNA Encoder:</strong> RNA-FM pre-trained transformer model</li>
