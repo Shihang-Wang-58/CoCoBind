@@ -1,0 +1,24 @@
+# Optional dependencies for precomputing Ouroboros molecular features.
+# Install after requirements.txt in the same Python 3.9 environment.
+#
+# CUDA 12.1 / PyTorch 2.2.1 stack used by the bundled Ouroboros code:
+#   pip install -r requirements.txt
+#   pip install -r requirements-ouroboros.txt
+
+--extra-index-url https://download.pytorch.org/whl/cu121
+--find-links https://data.dgl.ai/wheels/torch-2.2/cu121/repo.html
+
+torch==2.2.1
+torchvision==0.17.1
+torchaudio==2.2.1
+
+dgl
+dglgo
+dgllife
+
+matplotlib>=3.7,<4
+seaborn>=0.13,<0.14
+dill==0.3.9
+pyarrow==19.0.0
+selfies==2.2.0
+oddt==0.7

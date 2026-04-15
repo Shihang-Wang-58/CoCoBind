@@ -254,6 +254,8 @@ def create_dataloaders(
     use_bs_data: bool = True,
     mol_encoder: str = "ecfp4",
     mol_features_path: Optional[str] = None,
+    mol_model_path: Optional[str] = None,
+    mol_cache_dir: Optional[str] = None,
 ) -> Tuple[DataLoader, DataLoader, DataLoader, RNAFMFeaturizer]:
     """
     Create train, validation, and test data loaders.
@@ -270,8 +272,17 @@ def create_dataloaders(
         use_bs_data: Whether to use bs_data for real site annotations
         mol_encoder: Molecular encoder type ("ecfp4", "kpgt", "ouroboros")
         mol_features_path: Precomputed molecular features path
+        mol_model_path: Path to an on-demand molecular encoder model
     """
     paths = get_data_paths(data_root, split, fold, use_bs_data=use_bs_data)
+    use_on_demand_ouroboros = (
+        mol_encoder.lower() == "ouroboros"
+        and mol_model_path is not None
+        and (mol_features_path is None or not os.path.exists(mol_features_path))
+    )
+    if use_on_demand_ouroboros and num_workers != 0:
+        logger.warning("On-demand Ouroboros features use CUDA internally; forcing num_workers=0")
+        num_workers = 0
     
     for name, path_dict in paths.items():
         dti_path = path_dict["dti"]
@@ -281,6 +292,9 @@ def create_dataloaders(
     mol_featurizer = get_mol_featurizer(
         mol_encoder=mol_encoder,
         mol_features_path=mol_features_path,
+        mol_model_path=mol_model_path,
+        mol_cache_dir=mol_cache_dir,
+        device=device,
         n_bits=2048,
     )
     

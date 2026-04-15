@@ -10,11 +10,19 @@ __version__ = "1.0.0"
 __author__ = "CoCoBind Team"
 
 from .model import RNADTModel
-from .featurizers import ECFP4Featurizer, RNAFMFeaturizer, PrecomputedMolFeaturizer
+from .featurizers import (
+    ECFP4Featurizer,
+    HybridMolFeaturizer,
+    OuroborosFeaturizer,
+    PrecomputedMolFeaturizer,
+    RNAFMFeaturizer,
+)
 
 __all__ = [
     "RNADTModel",
     "ECFP4Featurizer",
+    "HybridMolFeaturizer",
     "RNAFMFeaturizer",
     "PrecomputedMolFeaturizer",
+    "OuroborosFeaturizer",
 ]

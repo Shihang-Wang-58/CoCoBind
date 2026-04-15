@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import './JobStatus.css';
 
-const API_BASE = 'http://localhost:8000';
+const API_BASE = '/cocobind/api';
 
 const JobStatus = () => {
   const [jobId, setJobId] = useState('');

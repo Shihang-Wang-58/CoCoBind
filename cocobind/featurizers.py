@@ -13,8 +13,9 @@ import os
 import hashlib
 import logging
 import pickle
+import sys
 from pathlib import Path
-from typing import Optional, Dict
+from typing import Optional, Dict, List
 
 import numpy as np
 import torch
@@ -124,6 +125,112 @@ class PrecomputedMolFeaturizer:
             "precomputed_misses": self.misses,
             "hit_rate": f"{self.hits/total:.2%}" if total > 0 else "N/A"
         }
+
+
+class OuroborosFeaturizer:
+    """
+    On-demand Ouroboros molecular feature extractor with disk caching.
+
+    This avoids a separate precompute step for small prediction jobs. For
+    training and large virtual-screening libraries, precomputed .pkl features
+    are still faster and easier to audit.
+    """
+
+    def __init__(
+        self,
+        model_path: str,
+        cache_dir: str = "cache/ouroboros_features",
+        batch_size: int = 256,
+        device: str = "cuda",
+    ):
+        self.model_path = str(model_path)
+        self.cache_dir = Path(cache_dir)
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self.batch_size = batch_size
+        self.device = device
+        self.feature_dim = 2048
+        self._model = None
+
+    def _load_model(self):
+        if self._model is not None:
+            return
+        if self.device.startswith("cuda") and not torch.cuda.is_available():
+            raise RuntimeError(
+                "Ouroboros on-demand features require a CUDA-enabled PyTorch/DGL stack. "
+                "Use precomputed features or run on a GPU server."
+            )
+
+        ouroboros_root = Path(self.model_path).resolve().parents[1]
+        if str(ouroboros_root) not in sys.path:
+            sys.path.insert(0, str(ouroboros_root))
+
+        try:
+            from ouroboros.model.GeminiMol import GeminiMol
+        except ImportError as exc:
+            raise ImportError(
+                f"Cannot import Ouroboros from {ouroboros_root}. "
+                "Install requirements-ouroboros.txt and check mol_encoder.model_path."
+            ) from exc
+
+        logger.info(f"Loading Ouroboros model from {self.model_path}")
+        self._model = GeminiMol(
+            model_path=self.model_path,
+            batch_size=self.batch_size,
+            cache=True,
+        )
+        self._model.eval()
+
+    def _get_cache_path(self, smiles: str) -> Path:
+        smi_hash = hashlib.md5(smiles.encode()).hexdigest()
+        return self.cache_dir / f"{smi_hash}.npy"
+
+    def encode_many(self, smiles_list: List[str]) -> torch.Tensor:
+        features = [None] * len(smiles_list)
+        missing_indices = []
+        missing_smiles = []
+
+        for i, smi in enumerate(smiles_list):
+            cache_path = self._get_cache_path(smi)
+            if cache_path.exists():
+                features[i] = np.load(cache_path).astype(np.float32)
+            else:
+                missing_indices.append(i)
+                missing_smiles.append(smi)
+
+        if missing_smiles:
+            self._load_model()
+            with torch.no_grad():
+                encoded = self._model.encode(missing_smiles).detach().cpu().numpy().astype(np.float32)
+            for i, smi, feat in zip(missing_indices, missing_smiles, encoded):
+                np.save(self._get_cache_path(smi), feat)
+                features[i] = feat
+
+        return torch.from_numpy(np.stack(features).astype(np.float32))
+
+    def __call__(self, smiles: str) -> torch.Tensor:
+        return self.encode_many([smiles])[0]
+
+
+class HybridMolFeaturizer:
+    """Try a primary featurizer first, then fall back to an on-demand featurizer."""
+
+    def __init__(self, primary, fallback):
+        self.primary = primary
+        self.fallback = fallback
+        self.feature_dim = getattr(primary, "feature_dim", getattr(fallback, "feature_dim", None))
+
+    def __call__(self, smiles: str) -> torch.Tensor:
+        try:
+            return self.primary(smiles)
+        except KeyError:
+            return self.fallback(smiles)
+
+    def get_stats(self) -> dict:
+        stats = {}
+        if hasattr(self.primary, "get_stats"):
+            stats.update(self.primary.get_stats())
+        stats["fallback"] = type(self.fallback).__name__
+        return stats
 
 
 class RNAFMFeaturizer:
@@ -259,14 +366,19 @@ def get_rna_embedding_dim(model_name: str = "multimolecule/rnafm") -> int:
 def get_mol_featurizer(
     mol_encoder: str = "ecfp4",
     mol_features_path: Optional[str] = None,
+    mol_model_path: Optional[str] = None,
+    mol_cache_dir: Optional[str] = None,
+    device: str = "cuda",
     n_bits: int = 2048,
+    fallback_to_ecfp: bool = False,
 ):
     """
     Get molecular feature extractor.
     
     Args:
         mol_encoder: Encoder type ("ecfp4", "kpgt", "ouroboros")
-        mol_features_path: Precomputed features path (required for KPGT/Ouroboros)
+        mol_features_path: Optional precomputed features path for KPGT/Ouroboros
+        mol_model_path: Optional model path for on-demand Ouroboros features
         n_bits: ECFP4 bits
         
     Returns:
@@ -278,11 +390,44 @@ def get_mol_featurizer(
         logger.info(f"Using ECFP4 featurizer (n_bits={n_bits})")
         return ECFP4Featurizer(n_bits=n_bits)
     
-    elif mol_encoder in ["kpgt", "ouroboros"]:
+    elif mol_encoder == "ouroboros":
+        if mol_features_path is not None and os.path.exists(mol_features_path):
+            logger.info(f"Using precomputed OUROBOROS features from {mol_features_path}")
+            primary = PrecomputedMolFeaturizer(mol_features_path, fallback_to_ecfp=fallback_to_ecfp)
+            if mol_model_path is not None and os.path.exists(mol_model_path):
+                cache_dir = mol_cache_dir or "cache/ouroboros_features"
+                fallback = OuroborosFeaturizer(
+                    model_path=mol_model_path,
+                    cache_dir=cache_dir,
+                    device=device,
+                )
+                return HybridMolFeaturizer(primary, fallback)
+            return primary
+
+        if mol_features_path is not None and not os.path.exists(mol_features_path):
+            logger.warning(f"Precomputed Ouroboros features not found: {mol_features_path}")
+
+        if mol_model_path is None:
+            raise ValueError(
+                "Either mol_features_path or mol_model_path is required for Ouroboros. "
+                "Use a precomputed .pkl for speed, or provide mol_encoder.model_path "
+                "for on-demand feature extraction."
+            )
+        if not os.path.exists(mol_model_path):
+            raise FileNotFoundError(f"Ouroboros model_path not found: {mol_model_path}")
+        cache_dir = mol_cache_dir or "cache/ouroboros_features"
+        logger.info(f"Using on-demand Ouroboros features from {mol_model_path}; cache={cache_dir}")
+        return OuroborosFeaturizer(
+            model_path=mol_model_path,
+            cache_dir=cache_dir,
+            device=device,
+        )
+
+    elif mol_encoder == "kpgt":
         if mol_features_path is None:
             raise ValueError(
-                f"mol_features_path is required for {mol_encoder}. "
-                f"Please run precompute_mol_features.py first."
+                "mol_features_path is required for KPGT. "
+                "Please run precompute_mol_features.py first."
             )
         if not os.path.exists(mol_features_path):
             raise FileNotFoundError(
@@ -290,7 +435,7 @@ def get_mol_featurizer(
                 f"Please run: python -m cocobind.precompute_mol_features --model {mol_encoder} ..."
             )
         logger.info(f"Using precomputed {mol_encoder.upper()} features from {mol_features_path}")
-        return PrecomputedMolFeaturizer(mol_features_path, fallback_to_ecfp=True)
+        return PrecomputedMolFeaturizer(mol_features_path, fallback_to_ecfp=fallback_to_ecfp)
     
     else:
         raise ValueError(f"Unknown mol_encoder: {mol_encoder}. Use 'ecfp4', 'kpgt', or 'ouroboros'")

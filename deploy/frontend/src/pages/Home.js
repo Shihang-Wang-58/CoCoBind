@@ -63,7 +63,7 @@ const Home = () => {
             className="hero-visual"
           >
             <img 
-              src="/model_architecture.png" 
+              src={`${process.env.PUBLIC_URL}/model_architecture.png`} 
               alt="CoCoBind Model Architecture" 
               className="hero-arch-img"
             />

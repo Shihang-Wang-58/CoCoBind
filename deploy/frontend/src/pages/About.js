@@ -35,7 +35,7 @@ const About = () => {
               <strong>Consistency Constraints:</strong> Novel loss function ensures coherence between interaction and site predictions
             </li>
             <li>
-              <strong>ECFP4 Fingerprints:</strong> State-of-the-art molecular representations for small molecules
+              <strong>Ouroboros embeddings:</strong> State-of-the-art molecular representations for small molecules
             </li>
           </ul>
         </div>
@@ -44,7 +44,7 @@ const About = () => {
           <h2>Model Architecture</h2>
           <div className="arch-img-container">
             <img 
-              src="/model_architecture.png" 
+              src={`${process.env.PUBLIC_URL}/model_architecture.png`} 
               alt="CoCoBind Model Architecture" 
               className="arch-img"
             />
@@ -52,7 +52,7 @@ const About = () => {
           <p>CoCoBind consists of the following components:</p>
           <ol className="architecture-list">
             <li><strong>RNA Encoder:</strong> RNA-FM pre-trained transformer model</li>
-            <li><strong>Molecule Encoder:</strong> ECFP4 fingerprint projector</li>
+            <li><strong>Molecule Encoder:</strong> Ouroboros pre-trained WLN model</li>
             <li><strong>Cross-Attention Layer:</strong> RNA-molecule feature fusion</li>
             <li><strong>Dual Prediction Heads:</strong>
               <ul>
@@ -92,9 +92,9 @@ const About = () => {
             <p>If you use CoCoBind in your research, please cite:</p>
             <code>
               @article&#123;cocobind2026,<br/>
-              &nbsp;&nbsp;title=&#123;CoCoBind: Cooperative Consistency-constrained Binding Prediction&#125;,<br/>
-              &nbsp;&nbsp;author=&#123;Your Team&#125;,<br/>
-              &nbsp;&nbsp;journal=&#123;Journal Name&#125;,<br/>
+              &nbsp;&nbsp;title=&#123;CoCoBind: Consistency-Contrastive Multitask Learning for RNA-Ligand Interaction and Binding Site Prediction&#125;,<br/>
+              &nbsp;&nbsp;author=&#123;IDDD Lab&#125;,<br/>
+              &nbsp;&nbsp;journal=&#123; &#125;,<br/>
               &nbsp;&nbsp;year=&#123;2026&#125;<br/>
               &#125;
             </code>

@@ -15,20 +15,20 @@ predict.py — 新样本预测脚本
 Usage
 -----
 # 单条预测
-python -m rnadt.predict \\
-    --checkpoint outputs/base/unseen_pair/fold0/best.pt \\
+python -m cocobind.predict \\
+    --checkpoint models/ECFP4/best_model.pt \\
     --sequence "GGCUAGCUAUAGC" \\
     --smiles "CC1=NC2=CC=CC=C2N1"
 
 # CSV 批量预测
-python -m rnadt.predict \\
-    --checkpoint outputs/base/unseen_pair/fold0/best.pt \\
+python -m cocobind.predict \\
+    --checkpoint models/ECFP4/best_model.pt \\
     --input_csv samples.csv \\
     --output_csv predictions.csv
 
 # 交互模式
-python -m rnadt.predict \\
-    --checkpoint outputs/base/unseen_pair/fold0/best.pt \\
+python -m cocobind.predict \\
+    --checkpoint models/ECFP4/best_model.pt \\
     --interactive
 """
 from __future__ import annotations
@@ -53,11 +53,11 @@ _PROJECT_DIR = _SCRIPT_DIR.parent
 sys.path.insert(0, str(_PROJECT_DIR))
 
 try:
-    from rnadt.model import RNADTModel
-    from rnadt.featurizers import RNAFMFeaturizer, get_mol_featurizer, get_mol_feature_dim
+    from .model import RNADTModel
+    from .featurizers import RNAFMFeaturizer, get_mol_featurizer, get_mol_feature_dim
 except ImportError:
-    from model import RNADTModel
-    from featurizers import RNAFMFeaturizer, get_mol_featurizer, get_mol_feature_dim
+    from cocobind.model import RNADTModel
+    from cocobind.featurizers import RNAFMFeaturizer, get_mol_featurizer, get_mol_feature_dim
 
 logging.basicConfig(
     level=logging.INFO,
@@ -90,12 +90,18 @@ def load_model(
     logger.info(f"Config: {config_path}")
 
     if mol_encoder_override:
-        config["mol_encoder"] = {"type": mol_encoder_override}
+        config.setdefault("mol_encoder", {})
+        config["mol_encoder"]["type"] = mol_encoder_override
 
     model_cfg = config.get("model", {})
+    mol_cfg = config.get("mol_encoder", {}) or {}
+    mol_encoder = mol_cfg.get("type", "ecfp4")
+    mol_features_path = mol_cfg.get("features_path", None)
+    d_mol = get_mol_feature_dim(mol_encoder, mol_features_path)
+
     model = RNADTModel(
         d_rna=640,
-        d_mol=model_cfg.get("d_mol", 2048),
+        d_mol=model_cfg.get("d_mol", d_mol),
         d_model=model_cfg.get("d_model", 256),
         n_mol_tokens=model_cfg.get("n_mol_tokens", 4),
         n_heads=model_cfg.get("n_heads", 4),
@@ -110,6 +116,7 @@ def load_model(
 
     logger.info(f"Model loaded: {checkpoint_path}  "
                 f"(d_model={model_cfg.get('d_model')}, "
+                f"mol_encoder={mol_encoder}, "
                 f"n_heads={model_cfg.get('n_heads')}, "
                 f"cross_attn={model_cfg.get('use_cross_attn', True)})")
     return model, config
@@ -148,7 +155,7 @@ def predict_single(
     L = min(len(seq_clean), max_len)
 
     with torch.no_grad():
-        rna_embed = rna_featurizer(seq_clean)
+        rna_embed = rna_featurizer(seq_clean, max_len=max_len)
         if isinstance(rna_embed, torch.Tensor):
             rna_embed = rna_embed.numpy()
         rna_embed = rna_embed[:L]
@@ -326,36 +333,39 @@ def parse_args():
         epilog="""
 Examples:
   # 单条
-  python -m rnadt.predict \\
-      --checkpoint outputs/base/unseen_pair/fold0/best.pt \\
+  python -m cocobind.predict \\
+      --checkpoint models/ECFP4/best_model.pt \\
       --sequence "GGCUAGCUAUAGCUAGC" \\
       --smiles "CC1=NC2=CC=CC=C2N1"
 
   # CSV 批量 (需含 sequence, smiles 列)
-  python -m rnadt.predict \\
-      --checkpoint outputs/base/unseen_pair/fold0/best.pt \\
+  python -m cocobind.predict \\
+      --checkpoint models/ECFP4/best_model.pt \\
       --input_csv samples.csv --output_csv predictions.csv
 
   # 交互模式
-  python -m rnadt.predict \\
-      --checkpoint outputs/base/unseen_pair/fold0/best.pt \\
+  python -m cocobind.predict \\
+      --checkpoint models/ECFP4/best_model.pt \\
       --interactive
 """,
     )
     # Model
     p.add_argument("--checkpoint", required=True,
-                   help="Path to model checkpoint (best.pt)")
+                   help="Path to model checkpoint (.pt)")
     p.add_argument("--config", default=None,
                    help="Config file; auto-detected from checkpoint dir if omitted")
     p.add_argument("--mol_encoder", default=None,
                    choices=["ecfp4", "kpgt", "ouroboros"],
                    help="Molecular encoder (default: read from config). "
                         "ecfp4 can encode any SMILES on-the-fly; "
-                        "kpgt/ouroboros REQUIRE precomputed features via --mol_features_path")
+                        "kpgt uses precomputed features; ouroboros can use --mol_features_path "
+                        "or --mol_model_path")
     p.add_argument("--mol_features_path", default=None,
                    help="Precomputed molecular features (.pkl). "
-                        "Required for kpgt/ouroboros; generate with: "
-                        "python -m rnadt.precompute_mol_features --model ouroboros ...")
+                        "Recommended for kpgt/ouroboros; generate with: "
+                        "python -m cocobind.precompute_mol_features --model ouroboros ...")
+    p.add_argument("--mol_model_path", default=None,
+                   help="Molecular encoder model path for on-demand Ouroboros features")
     p.add_argument("--gpu", type=int, default=0, help="GPU device ID")
     p.add_argument("--max_len", type=int, default=512,
                    help="Maximum RNA sequence length")
@@ -394,33 +404,49 @@ def _init_featurizers(config: dict, args) -> Tuple:
 
     mol_encoder = args.mol_encoder or config.get("mol_encoder", {}).get("type", "ecfp4")
     mol_features_path = args.mol_features_path
+    mol_model_path = args.mol_model_path or config.get("mol_encoder", {}).get("model_path")
+    mol_cache_dir = config.get("mol_encoder", {}).get("cache_dir")
+    if mol_features_path and not Path(mol_features_path).is_absolute():
+        mol_features_path = str(_PROJECT_DIR / mol_features_path)
+    if mol_features_path and not Path(mol_features_path).exists():
+        logger.warning(f"Precomputed molecular features not found: {mol_features_path}")
+        mol_features_path = None
+    if mol_model_path and not Path(mol_model_path).is_absolute():
+        mol_model_path = str(_PROJECT_DIR / mol_model_path)
+    if mol_encoder == "ouroboros" and mol_model_path is None:
+        default_model_path = _PROJECT_DIR / "Ouroboros" / "models" / "Ouroboros_M1c"
+        if default_model_path.exists():
+            mol_model_path = str(default_model_path)
+    if mol_cache_dir and not Path(mol_cache_dir).is_absolute():
+        mol_cache_dir = str(_PROJECT_DIR / mol_cache_dir)
 
-    if mol_features_path is None and mol_encoder != "ecfp4":
+    if mol_features_path is None and mol_model_path is None and mol_encoder != "ecfp4":
         cfg_path = config.get("mol_encoder", {}).get("features_path", "")
         possible = [
             _PROJECT_DIR / f"cache/mol_features/{mol_encoder}_features.pkl",
             _SCRIPT_DIR / f"cache/mol_features/{mol_encoder}_features.pkl",
         ]
         if cfg_path:  # avoid Path("").exists() edge case
-            possible.append(Path(cfg_path))
+            cfg_feature_path = Path(cfg_path)
+            possible.append(cfg_feature_path if cfg_feature_path.is_absolute() else _PROJECT_DIR / cfg_feature_path)
         for pp in possible:
             if pp.exists():
                 mol_features_path = str(pp)
                 logger.info(f"Auto-detected features: {mol_features_path}")
                 break
         if mol_features_path is None:
-            logger.warning(
-                f"⚠ Precomputed features for {mol_encoder} not found at any of:\n"
-                + "\n".join(f"    {p}" for p in possible)
-                + f"\n  → Falling back to ECFP4.\n"
-                f"  To use {mol_encoder}, run:\n"
-                f"    python -m rnadt.precompute_mol_features --model {mol_encoder} ..."
+            raise FileNotFoundError(
+                f"Precomputed features for {mol_encoder} not found at any auto-detected path. "
+                "Pass --mol_features_path or set mol_encoder.features_path in the config. "
+                f"To create them, run: python -m cocobind.precompute_mol_features --model {mol_encoder} ..."
             )
-            mol_encoder = "ecfp4"
 
     mol_featurizer = get_mol_featurizer(
         mol_encoder=mol_encoder,
         mol_features_path=mol_features_path,
+        mol_model_path=mol_model_path,
+        mol_cache_dir=mol_cache_dir,
+        device=str(torch.device(f"cuda:{args.gpu}" if torch.cuda.is_available() else "cpu")),
     )
     logger.info(f"Mol encoder: {mol_encoder}")
     return rna_featurizer, mol_featurizer

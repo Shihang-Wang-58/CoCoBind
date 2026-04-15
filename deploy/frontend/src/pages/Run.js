@@ -1,9 +1,9 @@
-import React, { useState, useRef } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import axios from 'axios';
 import { motion } from 'framer-motion';
 import './Run.css';
 
-const API_BASE = 'http://localhost:8000';
+const API_BASE = '/cocobind/api';
 
 // Validation helpers
 const isValidRNA = (seq) => /^[AUGCaugc]+$/.test(seq.trim());
@@ -19,15 +19,21 @@ const Run = () => {
   const [smiles, setSmiles] = useState('');
   const [result, setResult] = useState(null);
   const [batchResults, setBatchResults] = useState(null);
+  const [screeningResult, setScreeningResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [validationErrors, setValidationErrors] = useState({});
-  const [mode, setMode] = useState('single'); // 'single' or 'batch'
+  const [mode, setMode] = useState('single'); // 'single', 'batch', or 'screen'
+  const [models, setModels] = useState([]);
+  const [libraries, setLibraries] = useState([]);
+  const [selectedModel, setSelectedModel] = useState('ECFP4');
+  const [selectedLibrary, setSelectedLibrary] = useState('');
+  const [topK, setTopK] = useState(20);
   const fileInputRef = useRef(null);
 
   const examples = {
-    rna: 'GGCUAGCUAUAGCUAGCUAUUGCAUAGCUAUAGCUAGCUAUUGCA',
-    smiles: 'CC1=NC2=CC=CC=C2N1'
+    rna: 'GCUUUGAUUUGGUGAAAUUCCAAAACCGACAGUAGAGUCUGGAUGAGAGAAGAUUC',
+    smiles: 'CCn1nc(C)c(CN2CCC(c3ccn[nH]3)C2)c1C'
   };
 
   const loadExample = () => {
@@ -35,6 +41,28 @@ const Run = () => {
     setSmiles(examples.smiles);
     setValidationErrors({});
   };
+
+  useEffect(() => {
+    const fetchOptions = async () => {
+      try {
+        const [modelsRes, librariesRes] = await Promise.all([
+          axios.get(`${API_BASE}/models`),
+          axios.get(`${API_BASE}/libraries`)
+        ]);
+        const modelList = modelsRes.data || [];
+        const libraryList = librariesRes.data || [];
+        setModels(modelList);
+        setLibraries(libraryList);
+        const defaultModel = modelList.find(m => m.default) || modelList[0];
+        if (defaultModel) setSelectedModel(defaultModel.id);
+        const firstReadyLibrary = libraryList.find(lib => lib.ready) || libraryList[0];
+        if (firstReadyLibrary) setSelectedLibrary(firstReadyLibrary.id);
+      } catch (err) {
+        console.error('Failed to load backend options:', err);
+      }
+    };
+    fetchOptions();
+  }, []);
 
   const validateInputs = () => {
     const errors = {};
@@ -68,7 +96,8 @@ const Run = () => {
     try {
       const response = await axios.post(`${API_BASE}/predict`, {
         rna_sequence: rnaSequence.trim().toUpperCase().replace(/T/g, 'U'),
-        smiles: smiles.trim()
+        smiles: smiles.trim(),
+        model_id: selectedModel
       });
       setResult(response.data);
     } catch (err) {
@@ -99,9 +128,11 @@ const Run = () => {
     setError(null);
     setResult(null);
     setBatchResults(null);
+    setScreeningResult(null);
 
     const formData = new FormData();
     formData.append('file', file);
+    formData.append('model_id', selectedModel);
 
     try {
       const response = await axios.post(`${API_BASE}/predict_batch`, formData, {
@@ -118,7 +149,73 @@ const Run = () => {
     }
   };
 
+  const validateScreeningInputs = () => {
+    const errors = {};
+    if (!rnaSequence.trim()) {
+      errors.rna = 'RNA sequence is required';
+    } else if (!isValidRNA(rnaSequence)) {
+      errors.rna = 'Invalid RNA sequence. Only A, U, G, C characters are allowed.';
+    } else if (rnaSequence.trim().length > 512) {
+      errors.rna = 'RNA sequence too long (max 512 nucleotides)';
+    }
+    if (!selectedLibrary) {
+      errors.library = 'Choose a compound library';
+    }
+    setValidationErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
+  const handleScreening = async (e) => {
+    e.preventDefault();
+    if (!validateScreeningInputs()) return;
+
+    setLoading(true);
+    setError(null);
+    setResult(null);
+    setBatchResults(null);
+    setScreeningResult(null);
+
+    try {
+      const libraryInfo = libraries.find(library => library.id === selectedLibrary);
+      const response = await axios.post(`${API_BASE}/screen`, {
+        rna_sequence: rnaSequence.trim().toUpperCase().replace(/T/g, 'U'),
+        model_id: selectedModel,
+        library_id: selectedLibrary,
+        top_k: Number(topK) || 20,
+        max_candidates: Math.min(libraryInfo?.n_rows || 20000, 200000)
+      });
+      setScreeningResult(response.data);
+    } catch (err) {
+      console.error(err);
+      const detail = err.response?.data?.detail;
+      setError(typeof detail === 'string' ? detail : 'Virtual screening failed. Check the selected model and library.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const downloadResults = () => {
+    if (screeningResult?.candidates?.length) {
+      const headers = ['rank', 'title', 'smiles', 'interaction_prob', 'model_id', 'library_id'];
+      const rows = screeningResult.candidates.map((r, idx) => [
+        idx + 1,
+        r.title || '',
+        r.smiles || '',
+        r.interaction_prob ?? '',
+        screeningResult.model_id || '',
+        screeningResult.library_id || ''
+      ]);
+      const csv = [headers.join(','), ...rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(','))].join('\n');
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'cocobind_screening_candidates.csv';
+      a.click();
+      URL.revokeObjectURL(url);
+      return;
+    }
+
     const data = batchResults || (result ? [result] : []);
     if (data.length === 0) return;
 
@@ -148,6 +245,7 @@ const Run = () => {
     setSmiles('');
     setResult(null);
     setBatchResults(null);
+    setScreeningResult(null);
     setError(null);
     setValidationErrors({});
     if (fileInputRef.current) fileInputRef.current.value = '';
@@ -263,6 +361,49 @@ const Run = () => {
     );
   };
 
+  const renderScreeningResult = (res) => (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="batch-results"
+    >
+      <div className="batch-summary">
+        <div>
+          <h3>Candidate Molecules</h3>
+          <p className="summary-copy">
+            {res.n_screened} screened from {res.library_id} with {res.model_id}
+          </p>
+        </div>
+        <button className="btn btn-secondary" onClick={downloadResults}>
+          Download CSV
+        </button>
+      </div>
+
+      <div className="batch-table-container">
+        <table className="sites-table">
+          <thead>
+            <tr>
+              <th>Rank</th>
+              <th>Compound</th>
+              <th>SMILES</th>
+              <th>Binding Score</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(res.candidates || []).map((candidate, idx) => (
+              <tr key={`${candidate.smiles}-${idx}`}>
+                <td>{idx + 1}</td>
+                <td>{candidate.title || '-'}</td>
+                <td className="smiles-cell">{candidate.smiles}</td>
+                <td>{(candidate.interaction_prob * 100).toFixed(2)}%</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </motion.div>
+  );
+
   return (
     <div className="run-page">
       <div className="container">
@@ -277,6 +418,22 @@ const Run = () => {
             <div className="card">
               <h2>Input Data</h2>
 
+              <div className="form-group">
+                <label>Model Version</label>
+                <select
+                  value={selectedModel}
+                  onChange={(e) => setSelectedModel(e.target.value)}
+                >
+                  {models.length === 0 ? (
+                    <option value={selectedModel}>{selectedModel}</option>
+                  ) : models.map(model => (
+                    <option key={model.id} value={model.id}>
+                      {model.label || model.id} ({model.mol_encoder})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               {/* Mode Tabs */}
               <div className="mode-tabs">
                 <button
@@ -290,6 +447,12 @@ const Run = () => {
                   onClick={() => setMode('batch')}
                 >
                   Batch (CSV Upload)
+                </button>
+                <button
+                  className={`mode-tab ${mode === 'screen' ? 'active' : ''}`}
+                  onClick={() => setMode('screen')}
+                >
+                  Virtual Screening
                 </button>
               </div>
 
@@ -391,6 +554,77 @@ const Run = () => {
                 </div>
               )}
 
+              {mode === 'screen' && (
+                <form onSubmit={handleScreening}>
+                  <div className={`form-group ${validationErrors.rna ? 'has-error' : ''}`}>
+                    <label>
+                      RNA Sequence
+                      <span className="required">*</span>
+                    </label>
+                    <textarea
+                      value={rnaSequence}
+                      onChange={(e) => {
+                        setRnaSequence(e.target.value);
+                        if (validationErrors.rna) setValidationErrors(v => ({...v, rna: null}));
+                      }}
+                      placeholder="Enter the RNA sequence to screen against..."
+                      rows={6}
+                    />
+                    <div className="field-footer">
+                      <small>{rnaSequence.length} nucleotides</small>
+                      {validationErrors.rna && <small className="error-text">{validationErrors.rna}</small>}
+                    </div>
+                  </div>
+
+                  <div className={`form-group ${validationErrors.library ? 'has-error' : ''}`}>
+                    <label>
+                      Compound Library
+                      <span className="required">*</span>
+                    </label>
+                    <select
+                      value={selectedLibrary}
+                      onChange={(e) => {
+                        setSelectedLibrary(e.target.value);
+                        if (validationErrors.library) setValidationErrors(v => ({...v, library: null}));
+                      }}
+                    >
+                      {libraries.length === 0 ? (
+                        <option value="">No libraries found</option>
+                      ) : libraries.map(library => (
+                        <option key={library.id} value={library.id} disabled={!library.ready}>
+                          {library.name} {library.n_rows ? `(${library.n_rows} molecules)` : ''}
+                        </option>
+                      ))}
+                    </select>
+                    {validationErrors.library && <small className="error-text">{validationErrors.library}</small>}
+                  </div>
+
+                  <div className="form-group">
+                    <label>Number of Candidates</label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="200"
+                      value={topK}
+                      onChange={(e) => setTopK(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="form-actions">
+                    <button type="submit" className="btn btn-primary" disabled={loading || !selectedLibrary}>
+                      {loading ? (
+                        <><span className="spinner"></span>Screening...</>
+                      ) : (
+                        <>Run Screening</>
+                      )}
+                    </button>
+                    <button type="button" className="btn btn-secondary" onClick={clearForm}>
+                      Clear
+                    </button>
+                  </div>
+                </form>
+              )}
+
               {error && (
                 <div className="alert alert-error">
                   <strong>Error:</strong> {error}
@@ -404,7 +638,7 @@ const Run = () => {
             <div className="card">
               <h2>Results</h2>
 
-              {!result && !batchResults && !loading && (
+              {!result && !batchResults && !screeningResult && !loading && (
                 <div className="empty-state">
                   <div className="empty-icon">📊</div>
                   <p>Results will appear here after prediction</p>
@@ -418,9 +652,11 @@ const Run = () => {
                 </div>
               )}
 
-              {result && !batchResults && renderSingleResult(result)}
+              {result && !batchResults && !screeningResult && renderSingleResult(result)}
 
-              {batchResults && (
+              {screeningResult && renderScreeningResult(screeningResult)}
+
+              {batchResults && !screeningResult && (
                 <motion.div
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}

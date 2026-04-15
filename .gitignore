@@ -94,3 +94,6 @@ mlruns/
 # Large model weights
 *.bin
 *.safetensors
+
+# Deploy
+deploy/frontend/node_modules

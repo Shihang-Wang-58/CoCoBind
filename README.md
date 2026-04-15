@@ -55,7 +55,7 @@ bash scripts/train.sh
 
 ```bash
 python -m cocobind.eval \
-    --checkpoint outputs/base/unseen_pair/fold0/best.pt \
+    --checkpoint models/ECFP4/best_model.pt \
     --split unseen_pair \
     --fold 0 \
     --save_preds
@@ -178,6 +178,152 @@ python -m cocobind.train --split unseen_pair --fold 0 \
     --mol_encoder ouroboros \
     --mol_features_path cache/mol_features/ouroboros_features.pkl
 ```
+
+### Precomputing Ouroboros Features
+
+Use the optional dependency set when you need to create Ouroboros molecular features in the same environment as CoCoBind:
+
+```bash
+pip install -r requirements.txt
+pip install -r requirements-ouroboros.txt
+```
+
+Then precompute a named feature file. `--output` can be either a directory or a concrete `.pkl` path, so you do not need to reuse `cache/mol_features` for every run:
+
+```bash
+python -m cocobind.precompute_mol_features \
+    --model ouroboros \
+    --model_path ./Ouroboros/models/Ouroboros_M1c \
+    --data_root ./data \
+    --output cache/ouroboros/unseen_pair_all_ouroboros.pkl \
+    --batch_size 256 \
+    --device cuda
+```
+
+For small ad-hoc prediction jobs, you can skip the `.pkl` file and let CoCoBind call Ouroboros directly. Features are cached under `cache/mol_features/<model-id>/` by the backend, but precomputing is still recommended for training and large screening libraries:
+
+```bash
+python -m cocobind.predict \
+    --checkpoint models/Ouroboros/best.pt \
+    --config models/Ouroboros/config_resolved.yaml \
+    --mol_encoder ouroboros \
+    --mol_model_path ./Ouroboros/models/Ouroboros_M1c \
+    --sequence "GGCUAGCUAUAGCUAGC" \
+    --smiles "CC1=NC2=CC=CC=C2N1"
+```
+
+For inference, pass the same molecular encoder family used by the checkpoint:
+
+```bash
+python -m cocobind.predict \
+    --checkpoint models/Ouroboros/best.pt \
+    --config models/Ouroboros/config_resolved.yaml \
+    --mol_encoder ouroboros \
+    --mol_features_path cache/ouroboros/unseen_pair_all_ouroboros.pkl \
+    --sequence "GGCUAGCUAUAGCUAGC" \
+    --smiles "CC1=NC2=CC=CC=C2N1"
+```
+
+Important: do not switch an ECFP4-trained checkpoint to Ouroboros features at inference time. Train or load a checkpoint that was trained with `--mol_encoder ouroboros` and the matching precomputed feature file.
+
+### Command-Line Virtual Screening
+
+You can screen a local compound library without starting the web backend. For the bundled MCE library and the RNA sequence below, the ECFP4 model can run directly:
+
+```bash
+python -m cocobind screen \
+  --model_id ECFP4 \
+  --sequence UGGGACACCCCUCCCCAACGAGGGGCGAAUAUCUGGAAGGAUA \
+  --library data/compound_library/MCE.csv \
+  --top_k 20 \
+  --max_candidates 48504 \
+  --output outputs/screening/MCE_ECFP4_UGGGAC.csv \
+  --device cuda
+```
+
+For the Ouroboros model, precompute library features once so repeated screening runs do not re-encode the same molecules:
+
+```bash
+python -m cocobind.precompute_mol_features \
+  --model ouroboros \
+  --model_path ./Ouroboros/models/Ouroboros_M1c \
+  --csv_files data/compound_library/MCE.csv \
+  --output cache/mol_features/MCE_ouroboros.pkl \
+  --batch_size 256 \
+  --device cuda
+```
+
+Then screen with the Ouroboros checkpoint:
+
+```bash
+python -m cocobind screen \
+  --model_id Ouroboros \
+  --sequence UGGGACACCCCUCCCCAACGAGGGGCGAAUAUCUGGAAGGAUA \
+  --library data/compound_library/MCE.csv \
+  --mol_features_path cache/mol_features/MCE_ouroboros.pkl \
+  --mol_model_path ./Ouroboros/models/Ouroboros_M1c \
+  --top_k 20 \
+  --max_candidates 48504 \
+  --output outputs/screening/MCE_Ouroboros_UGGGAC.csv \
+  --device cuda
+```
+
+`--max_candidates` is optional; remove it to score the full CSV. The script prints the top candidates to the terminal and writes the full ranked table when `--output` is set.
+
+### Web Model Selection and Screening
+
+The FastAPI backend auto-discovers model folders under `models/` and compound libraries under `data/compound_library/`. The React Run page can switch between model versions and run library screening through:
+
+- `GET /models`
+- `GET /libraries`
+- `POST /predict`
+- `POST /predict_batch`
+- `POST /screen`
+
+Example: screen the MCE compound library against one RNA sequence:
+
+```bash
+# Start the backend first in another shell:
+uvicorn deploy.backend.main:app --host 0.0.0.0 --port 8000
+
+# ECFP4 model: no molecular-feature precompute is needed.
+curl -X POST http://localhost:8000/screen \
+  -H "Content-Type: application/json" \
+  -d '{
+    "rna_sequence": "UGGGACACCCCUCCCCAACGAGGGGCGAAUAUCUGGAAGGAUA",
+    "model_id": "ECFP4",
+    "library_id": "MCE",
+    "top_k": 20,
+    "max_candidates": 48504
+  }'
+```
+
+For the Ouroboros model, precomputing the MCE library is recommended before web screening:
+
+```bash
+python -m cocobind.precompute_mol_features \
+  --model ouroboros \
+  --model_path ./Ouroboros/models/Ouroboros_M1c \
+  --csv_files data/compound_library/MCE.csv \
+  --output cache/mol_features/MCE_ouroboros.pkl \
+  --batch_size 256 \
+  --device cuda
+
+export COCOBIND_OUROBOROS_MOL_FEATURES_PATH=cache/mol_features/MCE_ouroboros.pkl
+uvicorn deploy.backend.main:app --host 0.0.0.0 --port 8000
+
+curl -X POST http://localhost:8000/screen \
+  -H "Content-Type: application/json" \
+  -d '{
+    "rna_sequence": "UGGGACACCCCUCCCCAACGAGGGGCGAAUAUCUGGAAGGAUA",
+    "model_id": "Ouroboros",
+    "library_id": "MCE",
+    "top_k": 20,
+    "max_candidates": 48504
+  }'
+```
+
+If `COCOBIND_OUROBOROS_MOL_FEATURES_PATH` is not set, the backend will try the feature path in `models/Ouroboros/config_resolved.yaml`. If a molecule is missing and `./Ouroboros/models/Ouroboros_M1c` is available, it can compute the missing Ouroboros feature on demand, but that is much slower for large libraries.
 
 ## 📄 License
 

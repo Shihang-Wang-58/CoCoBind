@@ -55,6 +55,8 @@ def parse_args():
                         help="Molecular encoder type")
     parser.add_argument("--mol_features_path", type=str, default=None,
                         help="Path to precomputed molecular features")
+    parser.add_argument("--mol_model_path", type=str, default=None,
+                        help="Path to molecular encoder model for on-demand features")
     return parser.parse_args()
 
 
@@ -171,6 +173,8 @@ def main():
     mol_encoder_cfg = config.get("mol_encoder", {})
     mol_encoder_type = args.mol_encoder if args.mol_encoder else mol_encoder_cfg.get("type", "ecfp4")
     mol_features_path = args.mol_features_path if args.mol_features_path else mol_encoder_cfg.get("features_path", None)
+    mol_model_path = args.mol_model_path if args.mol_model_path else mol_encoder_cfg.get("model_path", None)
+    mol_cache_dir = mol_encoder_cfg.get("cache_dir", None)
     
     train_loader, val_loader, test_loader, rna_featurizer = create_dataloaders(
         data_root=config["data"]["root"],
@@ -183,6 +187,8 @@ def main():
         num_workers=config.get("num_workers", 0),
         mol_encoder=mol_encoder_type,
         mol_features_path=mol_features_path,
+        mol_model_path=mol_model_path,
+        mol_cache_dir=mol_cache_dir,
     )
     logger.info(f"Test set size: {len(test_loader.dataset)}")
     
