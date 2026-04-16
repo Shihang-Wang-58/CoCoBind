@@ -1,0 +1,6 @@
+{
+    "num_layers": 4,
+    "num_heads": 32,
+    "activation": "SiLU",
+    "chemical_language": "SMILES"
+}

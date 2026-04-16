@@ -28,8 +28,20 @@ conda activate cocobind
 # Install PyTorch (adjust for your CUDA version)
 pip install torch==2.2.1 torchvision==0.17.1 torchaudio==2.2.1 --index-url https://download.pytorch.org/whl/cu121
 
-# Install dependencies
+# Install CoCoBind dependencies
 pip install -r requirements.txt
+
+# Install Ouroboros dependencies
+pip install six==1.17.0 
+pip install tqdm==4.67.1 dill==0.3.9 pyarrow==19.0.0 
+pip install pandas==1.5.3 scipy==1.13.1 matplotlib==3.9.4 
+pip install numpy==1.23.5 seaborn==0.13.2 selfies==2.2.0 scikit-learn==1.6.1
+pip install oddt --no-build-isolation
+pip install rdkit # rdkit==2024.9.5
+pip install dgl -f https://data.dgl.ai/wheels/torch-2.2/cu121/repo.html
+pip install dglgo -f https://data.dgl.ai/wheels/torch-2.2/cu121/repo.html
+pip install dgllife
+
 ```
 
 ### Training
@@ -228,7 +240,7 @@ Important: do not switch an ECFP4-trained checkpoint to Ouroboros features at in
 
 ### Command-Line Virtual Screening
 
-You can screen a local compound library without starting the web backend. For the bundled MCE library and the RNA sequence below, the ECFP4 model can run directly:
+You can screen a local compound library without starting the web backend. The `screen` subcommand now works directly from the package entry point:
 
 ```bash
 python -m cocobind screen \
@@ -237,8 +249,7 @@ python -m cocobind screen \
   --library data/compound_library/MCE.csv \
   --top_k 20 \
   --max_candidates 48504 \
-  --output outputs/screening/MCE_ECFP4_UGGGAC.csv \
-  --device cuda
+  --output outputs/screening/MCE_ECFP4.csv
 ```
 
 For the Ouroboros model, precompute library features once so repeated screening runs do not re-encode the same molecules:
@@ -253,22 +264,22 @@ python -m cocobind.precompute_mol_features \
   --device cuda
 ```
 
-Then screen with the Ouroboros checkpoint:
+Then screen with the Ouroboros checkpoint and matching precomputed features:
 
 ```bash
 python -m cocobind screen \
   --model_id Ouroboros \
   --sequence UGGGACACCCCUCCCCAACGAGGGGCGAAUAUCUGGAAGGAUA \
   --library data/compound_library/MCE.csv \
+  --mol_encoder ouroboros \
   --mol_features_path cache/mol_features/MCE_ouroboros.pkl \
   --mol_model_path ./Ouroboros/models/Ouroboros_M1c \
   --top_k 20 \
   --max_candidates 48504 \
-  --output outputs/screening/MCE_Ouroboros_UGGGAC.csv \
-  --device cuda
+  --output outputs/screening/MCE_Ouroboros.csv
 ```
 
-`--max_candidates` is optional; remove it to score the full CSV. The script prints the top candidates to the terminal and writes the full ranked table when `--output` is set.
+`--max_candidates` is optional; remove it to score the full CSV. The script prints the top candidates to the terminal and writes the ranked table when `--output` is set.
 
 ### Web Model Selection and Screening
 

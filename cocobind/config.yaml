@@ -36,7 +36,7 @@ train:
   # Optimizer
   optimizer: "adamw"
   # Scheduler
-  scheduler: "warmup_cosine"
+  scheduler: "cosine_warmup"
   warmup_epochs: 10
   min_lr: 1.0e-6
   # EMA
